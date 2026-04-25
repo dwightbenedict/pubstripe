@@ -16,8 +16,8 @@ from .session import create_session
 
 
 @retry(
-    stop=stop_after_attempt(settings.http.max_retries),
-    wait=wait_exponential_jitter(max=settings.http.max_retry_delay),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential_jitter(max=3.0),
     retry=retry_if_exception_type(
         (
             HTTPError,

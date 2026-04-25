@@ -3,8 +3,6 @@ from typing import AsyncGenerator
 
 from curl_cffi import requests
 
-from pubstripe.core.settings import settings
-
 
 BASE_URL = "https://api.stripe.com"
 HEADERS = {
@@ -21,7 +19,7 @@ async def create_session(proxy: str | None = None) -> AsyncGenerator[requests.As
         impersonate="chrome",
         http_version="v2",
         proxy=proxy,
-        timeout=settings.http.timeout,
+        timeout=20.0,
         verify=False
     ) as session:
         yield session
