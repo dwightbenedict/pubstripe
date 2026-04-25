@@ -9,7 +9,6 @@ from tenacity import (
     retry_if_exception_type
 )
 
-from pubstripe.core.settings import settings
 from pubstripe.exceptions import InvalidRequestError, InvalidPublishableKey
 
 from .session import create_session
