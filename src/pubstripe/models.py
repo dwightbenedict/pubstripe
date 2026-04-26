@@ -55,8 +55,8 @@ class CreditCard(BaseModel):
         return self
 
     @classmethod
-    def from_pipe(cls, line: str) -> Self:
-        card_parts = line.strip().split("|")
+    def from_pipe(cls, card_pipe: str) -> Self:
+        card_parts = card_pipe.strip().split("|")
 
         if len(card_parts) != 4:
             raise ValueError("Invalid pipe format")
