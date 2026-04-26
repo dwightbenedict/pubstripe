@@ -61,5 +61,4 @@ async def request_stripe(
     if status_code == 401:
         raise InvalidPublishableKey(data["error"]["message"])
 
-    response.raise_for_status()
     return response
