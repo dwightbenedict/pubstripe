@@ -20,3 +20,14 @@ class ConfirmIntentStatus(StrEnum):
 class CompleteIntentStatus(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+
+
+class ThreeDSecureStatus(StrEnum):
+    FRICTIONLESS = "frictionless"
+    FAILED = "failed"
+    UNAVAILABLE = "unavailable"
+    ATTEMPTED = "attempted"
+    CHALLENGE = "challenge"
+    REJECTED = "rejected"
+    DECOUPLED = "decoupled"
+    INFORMATIONAL = "informational"

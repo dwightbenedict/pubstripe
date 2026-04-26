@@ -3,7 +3,12 @@ from datetime import datetime
 
 from pydantic import BaseModel, StringConstraints, computed_field, field_validator, model_validator
 
-from pubstripe.enums import ProxyScheme, IntentType, ConfirmIntentStatus, CompleteIntentStatus
+from pubstripe.enums import (
+    ProxyScheme,
+    IntentType,
+    ConfirmIntentStatus,
+    CompleteIntentStatus
+)
 
 
 CardNumber = Annotated[str, StringConstraints(pattern=r"\d{15}|\d{16}")]
@@ -102,12 +107,6 @@ class Intent(BaseModel):
 class ThreeDSecureRequest(BaseModel):
     transaction_id: str
     source: str
-
-
-class ThreeDSecureResponse(BaseModel):
-    request_status: str
-    challenge_mandated: bool
-    transaction_status: str
 
 
 class ConfirmIntentResponse(BaseModel):

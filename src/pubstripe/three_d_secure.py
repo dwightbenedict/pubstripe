@@ -1,20 +1,20 @@
 import base64
-from urllib.parse import quote_plus
 import json
 
 from pubstripe.client.request import request_stripe
-from pubstripe.models import ThreeDSecureRequest, ThreeDSecureResponse, Proxy
+from pubstripe.models import ThreeDSecureRequest, Proxy
+from pubstripe.enums import ThreeDSecureStatus
 
 
-TDS_TRANSACTION_STATUS = {
-    "Y": "frictionless",
-    "N": "not_authenticated",
-    "U": "authentication_not_performed",
-    "A": "authentication_attempted",
-    "C": "challenge_required",
-    "R": "authentication_request_rejected",
-    "D": "decoupled_challenge_required",
-    "I": "authentication_not_requested"
+THREE_D_SECURE_STATUS: dict[str, ThreeDSecureStatus] = {
+    "Y": ThreeDSecureStatus.FRICTIONLESS,
+    "N": ThreeDSecureStatus.FAILED,
+    "U": ThreeDSecureStatus.UNAVAILABLE,
+    "A": ThreeDSecureStatus.ATTEMPTED,
+    "C": ThreeDSecureStatus.CHALLENGE,
+    "R": ThreeDSecureStatus.REJECTED,
+    "D": ThreeDSecureStatus.DECOUPLED,
+    "I": ThreeDSecureStatus.INFORMATIONAL,
 }
 
 
@@ -50,7 +50,7 @@ async def authenticate_three_d_secure(
         request:ThreeDSecureRequest,
         publishable_key: str,
         proxy: Proxy | None = None
-) -> ThreeDSecureResponse:
+) -> ThreeDSecureStatus:
     url = "/v1/3ds2/authenticate"
 
     fingerprint = b64_encode_fingerprint(request.transaction_id)
@@ -71,9 +71,4 @@ async def authenticate_three_d_secure(
     data = response.json()
 
     transaction_code = data["ares"]["transStatus"]
-    transaction_status = TDS_TRANSACTION_STATUS[transaction_code]
-    return ThreeDSecureResponse(
-        request_status=data["state"],
-        challenge_mandated=data["ares"]["acsChallengeMandated"],
-        transaction_status=transaction_status
-    )
+    return THREE_D_SECURE_STATUS[transaction_code]
