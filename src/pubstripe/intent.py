@@ -12,6 +12,23 @@ from pubstripe.exceptions import InvalidClientSecret
 
 
 def intent_from_client_secret(client_secret: str) -> Intent:
+    """Parse an :class:`~pubstripe.models.Intent` out of a raw client secret.
+
+    The intent's ID is the part of the secret before ``_secret_``, and its
+    type is inferred from that ID's prefix (``seti_`` for a SetupIntent,
+    ``pi_`` for a PaymentIntent).
+
+    Args:
+        client_secret: The client secret from a SetupIntent or PaymentIntent,
+            e.g. ``"pi_..._secret_..."``.
+
+    Returns:
+        The parsed :class:`~pubstripe.models.Intent`.
+
+    Raises:
+        InvalidClientSecret: If the secret's prefix matches neither
+            ``seti_`` nor ``pi_``.
+    """
     intent_id = client_secret.split("_secret_")[0]
 
     if intent_id.startswith("seti_"):
@@ -33,6 +50,33 @@ async def confirm_intent(
         publishable_key: str,
         proxy: Proxy | None = None
 ) -> ConfirmIntentResponse:
+    """Confirm a SetupIntent or PaymentIntent with arbitrary payment method data.
+
+    This is the low-level building block behind
+    :func:`confirm_intent_with_credit_card` and
+    :func:`confirm_intent_with_payment_method`; use one of those unless you
+    need to send custom ``payment_method_data[...]`` fields.
+
+    Args:
+        payment_method_data: The ``payment_method_data[...]`` (or
+            ``payment_method``) fields to submit, in Stripe's flat form
+            encoding.
+        client_secret: The intent's client secret.
+        publishable_key: The Stripe publishable key for the account that
+            owns the intent.
+        proxy: An optional proxy to route the request through.
+
+    Returns:
+        A :class:`~pubstripe.models.ConfirmIntentResponse` describing whether
+        confirmation succeeded, was declined, or requires a 3D Secure 2
+        challenge (in which case ``three_d_secure`` is populated — pass it
+        to :func:`pubstripe.three_d_secure.authenticate_three_d_secure`).
+
+    Raises:
+        InvalidClientSecret: If ``client_secret`` cannot be parsed.
+        InvalidRequestError: If Stripe rejects the request as malformed.
+        InvalidPublishableKey: If ``publishable_key`` is invalid.
+    """
     intent = intent_from_client_secret(client_secret)
 
     uri = f"/v1/{intent.resource}/{intent.id}/confirm"
@@ -89,6 +133,18 @@ async def confirm_intent_with_credit_card(
         publishable_key: str,
         proxy: Proxy | None = None
 ) -> ConfirmIntentResponse:
+    """Confirm a SetupIntent or PaymentIntent by submitting raw card details.
+
+    Args:
+        card: The credit card to confirm the intent with.
+        client_secret: The intent's client secret.
+        publishable_key: The Stripe publishable key for the account that
+            owns the intent.
+        proxy: An optional proxy to route the request through.
+
+    Returns:
+        See :func:`confirm_intent`.
+    """
     payment_method_data = {
         "payment_method_data[type]": "card",
         "payment_method_data[card][number]": card.number,
@@ -109,6 +165,19 @@ async def confirm_intent_with_payment_method(
         publishable_key: str,
         proxy: Proxy | None = None
 ) -> ConfirmIntentResponse:
+    """Confirm a SetupIntent or PaymentIntent using an existing payment method ID.
+
+    Args:
+        payment_method: An existing Stripe payment method ID, e.g. from
+            :func:`pubstripe.tokenization.create_payment_method`.
+        client_secret: The intent's client secret.
+        publishable_key: The Stripe publishable key for the account that
+            owns the intent.
+        proxy: An optional proxy to route the request through.
+
+    Returns:
+        See :func:`confirm_intent`.
+    """
     payment_method_data = {
         "payment_method": payment_method
     }
@@ -121,6 +190,25 @@ async def complete_intent_after_3ds2(
         publishable_key: str,
         proxy: Proxy | None = None
 ) -> CompleteIntentResponse:
+    """Check an intent's final status after a 3D Secure 2 challenge has completed.
+
+    Call this after :func:`pubstripe.three_d_secure.authenticate_three_d_secure`
+    returns, to find out whether the intent ultimately succeeded.
+
+    Args:
+        client_secret: The intent's client secret.
+        publishable_key: The Stripe publishable key for the account that
+            owns the intent.
+        proxy: An optional proxy to route the request through.
+
+    Returns:
+        A :class:`~pubstripe.models.CompleteIntentResponse` describing the
+        intent's final status.
+
+    Raises:
+        InvalidClientSecret: If ``client_secret`` cannot be parsed.
+        InvalidPublishableKey: If ``publishable_key`` is invalid.
+    """
     intent = intent_from_client_secret(client_secret)
     uri = f"/v1/{intent.resource}/{intent.id}"
     params = {

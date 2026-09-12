@@ -1,3 +1,5 @@
+"""Completing 3D Secure 2 (3DS2) authentication challenges."""
+
 import base64
 import json
 
@@ -16,9 +18,20 @@ THREE_D_SECURE_STATUS: dict[str, ThreeDSecureStatus] = {
     "D": ThreeDSecureStatus.DECOUPLED,
     "I": ThreeDSecureStatus.INFORMATIONAL,
 }
+"""Maps the ACS's single-letter ``transStatus`` code to a :class:`~pubstripe.enums.ThreeDSecureStatus`."""
 
 
 def b64_encode_fingerprint(transaction_id: str) -> str:
+    """Build the base64-encoded 3DS2 device fingerprint Stripe expects.
+
+    Args:
+        transaction_id: The 3DS2 server transaction ID
+            (``ThreeDSecureRequest.transaction_id``).
+
+    Returns:
+        A base64-encoded JSON object of the form
+        ``{"threeDSServerTransID": transaction_id}``.
+    """
     fingerprint = {
         "threeDSServerTransID": transaction_id
     }
@@ -29,6 +42,18 @@ def b64_encode_fingerprint(transaction_id: str) -> str:
 
 
 def get_browser_metadata(fingerprint: str) -> str:
+    """Build the browser metadata JSON string Stripe expects for a 3DS2 challenge.
+
+    The values describe a stock desktop Firefox browser so the request
+    matches what Stripe.js would normally send from an actual browser.
+
+    Args:
+        fingerprint: The encoded fingerprint from :func:`b64_encode_fingerprint`.
+
+    Returns:
+        A compact JSON string of browser metadata, ready to submit as the
+        ``browser`` form field.
+    """
     browser = {
         "fingerprintAttempted": True,
         "fingerprintData": fingerprint,
@@ -47,10 +72,35 @@ def get_browser_metadata(fingerprint: str) -> str:
 
 
 async def authenticate_three_d_secure(
-        request:ThreeDSecureRequest,
+        request: ThreeDSecureRequest,
         publishable_key: str,
         proxy: Proxy | None = None
 ) -> ThreeDSecureStatus:
+    """Complete a 3D Secure 2 authentication challenge for an intent.
+
+    Call this when :func:`pubstripe.intent.confirm_intent` (or one of its
+    variants) returns ``status=REQUIRES_ACTION`` with a ``three_d_secure``
+    payload. After this returns, call
+    :func:`pubstripe.intent.complete_intent_after_3ds2` to get the intent's
+    final status.
+
+    Args:
+        request: The 3DS2 challenge details from a
+            :class:`~pubstripe.models.ConfirmIntentResponse`.
+        publishable_key: The Stripe publishable key for the account that
+            owns the intent.
+        proxy: An optional proxy to route the request through.
+
+    Returns:
+        The authentication outcome as a
+        :class:`~pubstripe.enums.ThreeDSecureStatus`.
+
+    Raises:
+        InvalidRequestError: If Stripe rejects the request as malformed.
+        InvalidPublishableKey: If ``publishable_key`` is invalid.
+        KeyError: If Stripe returns a ``transStatus`` code not present in
+            :data:`THREE_D_SECURE_STATUS`.
+    """
     url = "/v1/3ds2/authenticate"
 
     fingerprint = b64_encode_fingerprint(request.transaction_id)
