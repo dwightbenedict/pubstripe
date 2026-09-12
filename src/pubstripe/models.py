@@ -1,12 +1,5 @@
-"""Pydantic data models used throughout pubstripe.
-
-These models validate and normalize the values pubstripe sends to and
-receives from Stripe's API: credit card details, proxy configuration,
-intents, and the responses returned by :mod:`pubstripe.intent`.
-"""
-
 from typing import Annotated, Self
-from datetime import datetime
+from datetime import date
 
 from pydantic import BaseModel, Field, StringConstraints, computed_field, field_validator, model_validator
 
@@ -61,27 +54,24 @@ class CreditCard(BaseModel):
     @field_validator("exp_year")
     @classmethod
     def validate_exp_year(cls, v: str) -> str:
-        """Normalize a two-digit year to four digits and reject expired or implausible years."""
-        now = datetime.now()
+        """Normalize a two-digit year to four digits.
+
+        Expiry itself (year *and* month together) is checked once, in
+        :meth:`validate_expiry`, after normalization has run.
+        """
         year = int(v)
 
         if len(v) == 2:
             year += 2000
-
-        if year < now.year:
-            raise ValueError("card expired")
-
-        if year > now.year + 20:
-            raise ValueError("exp_year too far in future")
 
         return str(year)
 
     @model_validator(mode="after")
     def validate_expiry(self) -> "CreditCard":
         """Reject a card whose expiration month/year has already passed."""
-        now = datetime.now()
+        today = date.today()
 
-        if (int(self.exp_year), int(self.exp_month)) < (now.year, now.month):
+        if (int(self.exp_year), int(self.exp_month)) < (today.year, today.month):
             raise ValueError("card expired")
 
         return self
