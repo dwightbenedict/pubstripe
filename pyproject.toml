@@ -5,8 +5,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pubstripe"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Process payments via Stripe’s API using only a publishable key."
+readme = "README.md"
 authors = [
     { name = "Dwight Langston" }
 ]
