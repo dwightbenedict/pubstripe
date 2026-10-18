@@ -10,6 +10,7 @@ from tenacity import (
 )
 
 from pubstripe.exceptions import InvalidRequestError, InvalidPublishableKey
+from pubstripe.models import Proxy
 
 from .session import create_session
 
@@ -26,10 +27,10 @@ from .session import create_session
     ),
     reraise=True
 )
-async def send_request(
+async def _request(
     session: AsyncSession,
     method: str,
-    url: str,
+    path: str,
     **kwargs: Any,
 ) -> Response:
     """Send a single HTTP request, retrying up to 3 times on transient failures.
@@ -42,7 +43,7 @@ async def send_request(
         session: An open session, typically from
             :func:`~pubstripe.client.session.create_session`.
         method: The HTTP method, e.g. ``"GET"`` or ``"POST"`` (case-insensitive).
-        url: The request path or full URL.
+        path: The request path or full URL.
         **kwargs: Extra keyword arguments forwarded to ``session.request``
             (e.g. ``data``, ``params``, ``proxy``).
 
@@ -51,14 +52,34 @@ async def send_request(
     """
     return await session.request(
         method=method.upper(),
-        url=url,
+        url=path,
         **kwargs,
     )
 
 
+def _error_message(response: Response) -> str:
+    """Describe a Stripe error response, tolerating non-JSON bodies.
+
+    Returns Stripe's ``error.message``, followed by the error ``code`` and
+    any ``extra_fields`` (e.g. a Checkout ``confirm_error_reason``) in
+    brackets, since the message alone is often generic.
+    """
+    try:
+        error = response.json()["error"]
+        message = error["message"]
+    except (ValueError, KeyError, TypeError):
+        return f"Stripe returned HTTP {response.status_code}."
+
+    details = [str(error["code"])] if error.get("code") else []
+    details += [f"{key}={value}" for key, value in (error.get("extra_fields") or {}).items()]
+
+    return f"{message} [{', '.join(details)}]" if details else message
+
+
 async def request_stripe(
     method: str,
-    url: str,
+    path: str,
+    proxy: Proxy | None = None,
     **kwargs: Any,
 ) -> Response:
     """Open a session, make one request to Stripe, and translate error responses.
@@ -66,37 +87,48 @@ async def request_stripe(
     This is the entry point used by every pubstripe function that talks to
     Stripe: it opens a short-lived session via
     :func:`~pubstripe.client.session.create_session`, sends the request
-    through :func:`send_request`, and raises a pubstripe exception for the
+    through :func:`_request`, and raises a pubstripe exception for the
     error statuses common to publishable-key requests.
 
     Args:
         method: The HTTP method, e.g. ``"GET"`` or ``"POST"``.
-        url: The request path, relative to Stripe's API base URL.
+        path: The request path, relative to Stripe's API base URL.
+        proxy: An optional proxy to route the session through.
         **kwargs: Extra keyword arguments forwarded to the session request,
-            such as ``data``, ``params``, or ``proxy``.
+            such as ``data`` or ``params``.
 
     Returns:
-        The HTTP response, for status codes other than 400/401.
+        The HTTP response, for status codes other than 400/401. Other error
+        statuses (e.g. 402) are returned as-is for the caller to handle.
 
     Raises:
         InvalidRequestError: If Stripe responds ``400 Bad Request``.
         InvalidPublishableKey: If Stripe responds ``401 Unauthorized``.
     """
-    async with create_session() as session:
-        response = await send_request(
+    async with create_session(proxy.url if proxy else None) as session:
+        response = await _request(
             session=session,
             method=method,
-            url=url,
+            path=path,
             **kwargs,
         )
 
     status_code = response.status_code
-    data = response.json()
 
     if status_code == 400:
-        raise InvalidRequestError(data["error"]["message"])
+        raise InvalidRequestError(_error_message(response))
 
     if status_code == 401:
-        raise InvalidPublishableKey(data["error"]["message"])
+        raise InvalidPublishableKey(_error_message(response))
 
     return response
+
+
+async def stripe_get(path: str, **kwargs: Any) -> Response:
+    """Send a ``GET`` to Stripe. Shorthand for :func:`request_stripe` with ``method="GET"``."""
+    return await request_stripe("GET", path=path, **kwargs)
+
+
+async def stripe_post(path: str, **kwargs: Any) -> Response:
+    """Send a ``POST`` to Stripe. Shorthand for :func:`request_stripe` with ``method="POST"``."""
+    return await request_stripe("POST", path=path, **kwargs)
