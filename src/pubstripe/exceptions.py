@@ -24,17 +24,18 @@ class InvalidPublishableKey(StripeException):
     """
 
 
-class InvalidPaymentMethod(StripeException):
-    """Raised when tokenizing or confirming a card fails because Stripe declines it (HTTP 402).
-
-    The exception message is Stripe's own ``error.message`` field.
-    """
-
-
-class InvalidClientSecret(StripeException):
+class InvalidClientSecret(StripeException, ValueError):
     """Raised when a client secret cannot be parsed into an intent.
 
     A valid client secret starts with ``seti_`` (a SetupIntent) or ``pi_``
     (a PaymentIntent) followed by ``_secret_...``. Anything else raises
-    this error.
+    this error. It also subclasses :class:`ValueError`.
+    """
+
+
+class StripeJsUnavailable(StripeException):
+    """Raised when the current Stripe.js build hash can't be determined.
+
+    Tokenization needs the hash for its ``payment_user_agent``. See
+    :func:`pubstripe.stripe_js.get_version`.
     """

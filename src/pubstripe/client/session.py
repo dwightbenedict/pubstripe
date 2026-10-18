@@ -31,6 +31,5 @@ async def create_session(proxy: str | None = None) -> AsyncGenerator[requests.As
         http_version="v2",
         proxy=proxy,
         timeout=20.0,
-        verify=False
     ) as session:
         yield session

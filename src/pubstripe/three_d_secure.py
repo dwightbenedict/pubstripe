@@ -1,27 +1,11 @@
-"""Completing 3D Secure 2 (3DS2) authentication challenges."""
-
 import base64
 import json
 
-from pubstripe.client.request import request_stripe
-from pubstripe.models import ThreeDSecureRequest, Proxy
-from pubstripe.enums import ThreeDSecureStatus
+from pubstripe.client.request import stripe_post
+from pubstripe.models import Proxy, ThreeDSecureRequest, ThreeDSecureResponse
 
 
-THREE_D_SECURE_STATUS: dict[str, ThreeDSecureStatus] = {
-    "Y": ThreeDSecureStatus.FRICTIONLESS,
-    "N": ThreeDSecureStatus.FAILED,
-    "U": ThreeDSecureStatus.UNAVAILABLE,
-    "A": ThreeDSecureStatus.ATTEMPTED,
-    "C": ThreeDSecureStatus.CHALLENGE,
-    "R": ThreeDSecureStatus.REJECTED,
-    "D": ThreeDSecureStatus.DECOUPLED,
-    "I": ThreeDSecureStatus.INFORMATIONAL,
-}
-"""Maps the ACS's single-letter ``transStatus`` code to a :class:`~pubstripe.enums.ThreeDSecureStatus`."""
-
-
-def b64_encode_fingerprint(transaction_id: str) -> str:
+def _b64_encode_fingerprint(transaction_id: str) -> str:
     """Build the base64-encoded 3DS2 device fingerprint Stripe expects.
 
     Args:
@@ -41,7 +25,7 @@ def b64_encode_fingerprint(transaction_id: str) -> str:
     return encoded.decode("utf-8")
 
 
-def get_browser_metadata(fingerprint: str) -> str:
+def _build_browser_metadata(fingerprint: str) -> str:
     """Build the browser metadata JSON string Stripe expects for a 3DS2 challenge.
 
     The values describe a stock desktop Firefox browser so the request
@@ -71,54 +55,44 @@ def get_browser_metadata(fingerprint: str) -> str:
     return json.dumps(browser, separators=(",", ":"))
 
 
-async def authenticate_three_d_secure(
+async def authenticate(
         request: ThreeDSecureRequest,
         publishable_key: str,
         proxy: Proxy | None = None
-) -> ThreeDSecureStatus:
-    """Complete a 3D Secure 2 authentication challenge for an intent.
+) -> ThreeDSecureResponse:
+    """Start a 3D Secure 2 authentication challenge for an intent.
 
-    Call this when :func:`pubstripe.intent.confirm_intent` (or one of its
-    variants) returns ``status=REQUIRES_ACTION`` with a ``three_d_secure``
-    payload. After this returns, call
-    :func:`pubstripe.intent.complete_intent_after_3ds2` to get the intent's
+    Call this when a confirmation (:func:`pubstripe.intent.confirm_with_credit_card`,
+    :func:`pubstripe.intent.confirm_with_payment_method` or
+    :func:`pubstripe.hosted.checkout.confirm`) returns
+    a :class:`~pubstripe.models.ConfirmResponse` whose ``intent`` has
+    ``status`` of ``requires_action`` and a ``three_d_secure`` payload. After this
+    returns, call :func:`pubstripe.intent.retrieve` to get the intent's
     final status.
 
     Args:
-        request: The 3DS2 challenge details from a
-            :class:`~pubstripe.models.ConfirmIntentResponse`.
+        request: The 3DS2 challenge details, i.e. the ``three_d_secure``
+            field of a :class:`~pubstripe.models.Intent`.
         publishable_key: The Stripe publishable key for the account that
             owns the intent.
         proxy: An optional proxy to route the request through.
 
     Returns:
-        The authentication outcome as a
-        :class:`~pubstripe.enums.ThreeDSecureStatus`.
+        A :class:`~pubstripe.models.ThreeDSecureResponse`; the outcome is
+        ``trans_status``, a :class:`~pubstripe.enums.ThreeDSecureStatus`.
 
     Raises:
         InvalidRequestError: If Stripe rejects the request as malformed.
         InvalidPublishableKey: If ``publishable_key`` is invalid.
-        KeyError: If Stripe returns a ``transStatus`` code not present in
-            :data:`THREE_D_SECURE_STATUS`.
+        pydantic.ValidationError: If the response has no ``ares.transStatus``,
+            or a code that :class:`~pubstripe.enums.ThreeDSecureStatus` lacks.
     """
-    url = "/v1/3ds2/authenticate"
-
-    fingerprint = b64_encode_fingerprint(request.transaction_id)
-    browser_metadata = get_browser_metadata(fingerprint)
-
+    path = "/v1/3ds2/authenticate"
+    fingerprint = _b64_encode_fingerprint(request.transaction_id)
     payload = {
         "source": request.source,
-        "browser": browser_metadata,
+        "browser": _build_browser_metadata(fingerprint),
         "key": publishable_key,
-        "one_click_authn_device_support[hosted]": False,
-        "one_click_authn_device_support[same_origin_frame]": False,
-        "one_click_authn_device_support[spc_eligible]": False,
-        "one_click_authn_device_support[webauthn_eligible]": True,
-        "one_click_authn_device_support[publickey_credentials_get_allowed]": False
     }
-
-    response = await request_stripe("POST", url, data=payload, proxy=proxy)
-    data = response.json()
-
-    transaction_code = data["ares"]["transStatus"]
-    return THREE_D_SECURE_STATUS[transaction_code]
+    response = await stripe_post(path, data=payload, proxy=proxy)
+    return ThreeDSecureResponse.model_validate(response.json())

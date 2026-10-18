@@ -3,36 +3,37 @@ from .models import (
     Proxy,
     Intent,
     ThreeDSecureRequest,
-    ConfirmIntentResponse,
-    CompleteIntentResponse,
+    StripeError,
+    CheckoutSession,
+    TokenizationResponse,
+    ConfirmResponse,
+    ThreeDSecureResponse,
 )
 from .enums import (
     ProxyScheme,
     IntentType,
-    ConfirmIntentStatus,
-    CompleteIntentStatus,
+    IntentStatus,
     ThreeDSecureStatus,
 )
+from .billing_details import Address, BillingDetails
 from .exceptions import (
     StripeException,
     InvalidRequestError,
     InvalidPublishableKey,
-    InvalidPaymentMethod,
     InvalidClientSecret,
+    StripeJsUnavailable,
 )
 from .intent import (
-    intent_from_client_secret,
-    confirm_intent,
-    confirm_intent_with_credit_card,
-    confirm_intent_with_payment_method,
-    complete_intent_after_3ds2,
+    confirm_with_credit_card,
+    confirm_with_payment_method,
+    retrieve,
 )
 from .tokenization import (
-    create_token,
     create_payment_method,
     create_confirmation_token,
 )
-from .three_d_secure import authenticate_three_d_secure
+from .three_d_secure import authenticate as authenticate_three_d_secure
+from .hosted import CheckoutContext, get_checkout_session, confirm as confirm_checkout
 
 
 __all__ = [
@@ -41,30 +42,36 @@ __all__ = [
     "Proxy",
     "Intent",
     "ThreeDSecureRequest",
-    "ConfirmIntentResponse",
-    "CompleteIntentResponse",
+    "StripeError",
+    "CheckoutSession",
+    "TokenizationResponse",
+    "ConfirmResponse",
+    "ThreeDSecureResponse",
     # enums
     "ProxyScheme",
     "IntentType",
-    "ConfirmIntentStatus",
-    "CompleteIntentStatus",
+    "IntentStatus",
     "ThreeDSecureStatus",
+    # billing details
+    "Address",
+    "BillingDetails",
     # exceptions
     "StripeException",
     "InvalidRequestError",
     "InvalidPublishableKey",
-    "InvalidPaymentMethod",
     "InvalidClientSecret",
+    "StripeJsUnavailable",
     # intents
-    "intent_from_client_secret",
-    "confirm_intent",
-    "confirm_intent_with_credit_card",
-    "confirm_intent_with_payment_method",
-    "complete_intent_after_3ds2",
+    "confirm_with_credit_card",
+    "confirm_with_payment_method",
+    "retrieve",
     # tokenization
-    "create_token",
     "create_payment_method",
     "create_confirmation_token",
     # 3D Secure
     "authenticate_three_d_secure",
+    # hosted Checkout
+    "CheckoutContext",
+    "get_checkout_session",
+    "confirm_checkout",
 ]

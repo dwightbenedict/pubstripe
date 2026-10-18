@@ -1,60 +1,42 @@
-from pubstripe.client.request import request_stripe
-from pubstripe.models import (
-    CreditCard,
-    Proxy,
-    Intent,
-    ThreeDSecureRequest,
-    ConfirmIntentResponse,
-    CompleteIntentResponse
-)
-from pubstripe.enums import IntentType, ConfirmIntentStatus, CompleteIntentStatus
+from pubstripe._utils import decline_response
+from pubstripe.client.request import stripe_get, stripe_post
 from pubstripe.exceptions import InvalidClientSecret
+from pubstripe.models import ConfirmResponse, CreditCard, Intent, Proxy
 
 
-def intent_from_client_secret(client_secret: str) -> Intent:
-    """Parse an :class:`~pubstripe.models.Intent` out of a raw client secret.
+def _intent_path(client_secret: str) -> str:
+    """Build the ``/v1/<resource>/<id>`` API path for a client secret.
 
-    The intent's ID is the part of the secret before ``_secret_``, and its
-    type is inferred from that ID's prefix (``seti_`` for a SetupIntent,
+    The intent's ID is the part of the secret before ``_secret_``; its
+    resource is inferred from that ID's prefix (``seti_`` for a SetupIntent,
     ``pi_`` for a PaymentIntent).
 
-    Args:
-        client_secret: The client secret from a SetupIntent or PaymentIntent,
-            e.g. ``"pi_..._secret_..."``.
-
-    Returns:
-        The parsed :class:`~pubstripe.models.Intent`.
-
     Raises:
-        InvalidClientSecret: If the secret's prefix matches neither
-            ``seti_`` nor ``pi_``.
+        InvalidClientSecret: If the prefix is neither ``seti_`` nor ``pi_``.
+            The secret itself is left out of the message.
     """
     intent_id = client_secret.split("_secret_")[0]
 
     if intent_id.startswith("seti_"):
-        intent_type = IntentType.SETUP_INTENT
-    elif intent_id.startswith("pi_"):
-        intent_type = IntentType.PAYMENT_INTENT
-    else:
-        raise InvalidClientSecret(f"Invalid client secret: {client_secret}")
+        return f"/v1/setup_intents/{intent_id}"
 
-    return Intent(
-        id=intent_id,
-        type=intent_type
-    )
+    if intent_id.startswith("pi_"):
+        return f"/v1/payment_intents/{intent_id}"
+
+    raise InvalidClientSecret("Invalid client secret: expected a 'seti_' or 'pi_' intent ID followed by '_secret_'.")
 
 
-async def confirm_intent(
+async def _confirm(
         payment_method_data: dict[str, str],
         client_secret: str,
         publishable_key: str,
         proxy: Proxy | None = None
-) -> ConfirmIntentResponse:
+) -> ConfirmResponse:
     """Confirm a SetupIntent or PaymentIntent with arbitrary payment method data.
 
     This is the low-level building block behind
-    :func:`confirm_intent_with_credit_card` and
-    :func:`confirm_intent_with_payment_method`; use one of those unless you
+    :func:`confirm_with_credit_card` and
+    :func:`confirm_with_payment_method`; use one of those unless you
     need to send custom ``payment_method_data[...]`` fields.
 
     Args:
@@ -67,19 +49,21 @@ async def confirm_intent(
         proxy: An optional proxy to route the request through.
 
     Returns:
-        A :class:`~pubstripe.models.ConfirmIntentResponse` describing whether
-        confirmation succeeded, was declined, or requires a 3D Secure 2
-        challenge (in which case ``three_d_secure`` is populated — pass it
-        to :func:`pubstripe.three_d_secure.authenticate_three_d_secure`).
+        A :class:`~pubstripe.models.ConfirmResponse`. A card decline is
+        returned rather than raised: ``error`` is set, and ``intent`` too when
+        Stripe attached one (some declines, e.g. an incorrect CVC, attach
+        none). Otherwise ``intent`` is set; if its ``status`` is
+        ``requires_action``, ``intent.three_d_secure`` is populated; pass it
+        to :func:`pubstripe.three_d_secure.authenticate`.
 
     Raises:
         InvalidClientSecret: If ``client_secret`` cannot be parsed.
         InvalidRequestError: If Stripe rejects the request as malformed.
         InvalidPublishableKey: If ``publishable_key`` is invalid.
+        curl_cffi.requests.exceptions.HTTPError: For any other error
+            status (e.g. 404 or 5xx). A 402 card decline is *not* raised.
     """
-    intent = intent_from_client_secret(client_secret)
-
-    uri = f"/v1/{intent.resource}/{intent.id}/confirm"
+    path = f"{_intent_path(client_secret)}/confirm"
     payload = {
         "expected_payment_method_type": "card",
         "key": publishable_key,
@@ -87,52 +71,22 @@ async def confirm_intent(
     }
     payload.update(payment_method_data)
 
-    response = await request_stripe("POST", uri, data=payload, proxy=proxy)
+    response = await stripe_post(path, data=payload, proxy=proxy)
     data = response.json()
 
     if response.status_code == 402:
-        error = data["error"]
-
-        return ConfirmIntentResponse(
-            intent=intent,
-            payment_method_data=payment_method_data,
-            status=ConfirmIntentStatus.FAILED,
-            code=error.get("decline_code") or error.get("code"),
-            message=error["message"],
-        )
+        return decline_response(data)
 
     response.raise_for_status()
-
-    if data["status"] == "requires_action":
-        three_d_secure_sdk = data["next_action"]["use_stripe_sdk"]
-        three_d_secure = ThreeDSecureRequest(
-            transaction_id=three_d_secure_sdk["server_transaction_id"],
-            source=three_d_secure_sdk["three_d_secure_2_source"],
-        )
-        return ConfirmIntentResponse(
-            intent=intent,
-            payment_method_data=payment_method_data,
-            status=ConfirmIntentStatus.REQUIRES_ACTION,
-            code="stripe_3ds2_fingerprint",
-            message="Must authenticate with 3D Secure 2.",
-            three_d_secure=three_d_secure
-        )
-
-    return ConfirmIntentResponse(
-        intent=intent,
-        payment_method_data=payment_method_data,
-        status=ConfirmIntentStatus.SUCCEEDED,
-        code=data["status"],
-        message="Payment method has been successfully validated."
-    )
+    return ConfirmResponse(intent=Intent.model_validate(data))
 
 
-async def confirm_intent_with_credit_card(
+async def confirm_with_credit_card(
         card: CreditCard,
         client_secret: str,
         publishable_key: str,
         proxy: Proxy | None = None
-) -> ConfirmIntentResponse:
+) -> ConfirmResponse:
     """Confirm a SetupIntent or PaymentIntent by submitting raw card details.
 
     Args:
@@ -143,7 +97,12 @@ async def confirm_intent_with_credit_card(
         proxy: An optional proxy to route the request through.
 
     Returns:
-        See :func:`confirm_intent`.
+        See :func:`_confirm`.
+
+    Raises:
+        InvalidClientSecret: If ``client_secret`` cannot be parsed.
+        InvalidRequestError: If Stripe rejects the request as malformed.
+        InvalidPublishableKey: If ``publishable_key`` is invalid.
     """
     payment_method_data = {
         "payment_method_data[type]": "card",
@@ -155,16 +114,15 @@ async def confirm_intent_with_credit_card(
     if card.cvc:
         payment_method_data["payment_method_data[card][cvc]"] = card.cvc
 
-    confirmation = await confirm_intent(payment_method_data, client_secret, publishable_key, proxy)
-    return confirmation
+    return await _confirm(payment_method_data, client_secret, publishable_key, proxy)
 
 
-async def confirm_intent_with_payment_method(
+async def confirm_with_payment_method(
         payment_method: str,
         client_secret: str,
         publishable_key: str,
         proxy: Proxy | None = None
-) -> ConfirmIntentResponse:
+) -> ConfirmResponse:
     """Confirm a SetupIntent or PaymentIntent using an existing payment method ID.
 
     Args:
@@ -176,24 +134,29 @@ async def confirm_intent_with_payment_method(
         proxy: An optional proxy to route the request through.
 
     Returns:
-        See :func:`confirm_intent`.
+        See :func:`_confirm`.
+
+    Raises:
+        InvalidClientSecret: If ``client_secret`` cannot be parsed.
+        InvalidRequestError: If Stripe rejects the request as malformed.
+        InvalidPublishableKey: If ``publishable_key`` is invalid.
     """
     payment_method_data = {
         "payment_method": payment_method
     }
-    confirmation = await confirm_intent(payment_method_data, client_secret, publishable_key, proxy)
-    return confirmation
+    return await _confirm(payment_method_data, client_secret, publishable_key, proxy)
 
 
-async def complete_intent_after_3ds2(
+async def retrieve(
         client_secret: str,
         publishable_key: str,
         proxy: Proxy | None = None
-) -> CompleteIntentResponse:
-    """Check an intent's final status after a 3D Secure 2 challenge has completed.
+) -> Intent:
+    """Fetch an intent as Stripe currently sees it.
 
-    Call this after :func:`pubstripe.three_d_secure.authenticate_three_d_secure`
-    returns, to find out whether the intent ultimately succeeded.
+    Call this after :func:`pubstripe.three_d_secure.authenticate`
+    returns, then check ``status`` (``succeeded`` on success, otherwise see
+    ``last_payment_error`` / ``last_setup_error``).
 
     Args:
         client_secret: The intent's client secret.
@@ -202,44 +165,20 @@ async def complete_intent_after_3ds2(
         proxy: An optional proxy to route the request through.
 
     Returns:
-        A :class:`~pubstripe.models.CompleteIntentResponse` describing the
-        intent's final status.
+        The :class:`~pubstripe.models.Intent`, exactly as Stripe reports it.
 
     Raises:
         InvalidClientSecret: If ``client_secret`` cannot be parsed.
+        InvalidRequestError: If Stripe rejects the request as malformed.
         InvalidPublishableKey: If ``publishable_key`` is invalid.
+        curl_cffi.requests.exceptions.HTTPError: For any other error status.
     """
-    intent = intent_from_client_secret(client_secret)
-    uri = f"/v1/{intent.resource}/{intent.id}"
+    path = _intent_path(client_secret)
     params = {
         "key": publishable_key,
         "client_secret": client_secret
     }
 
-    response = await request_stripe("GET", uri, params=params, proxy=proxy)
+    response = await stripe_get(path, params=params, proxy=proxy)
     response.raise_for_status()
-    data = response.json()
-
-    if data["status"] == "requires_payment_method":
-        error = data.get("last_payment_error") or data.get("last_setup_error")
-        return CompleteIntentResponse(
-            intent=intent,
-            status=CompleteIntentStatus.FAILED,
-            code=error.get("decline_code") or error.get("code"),
-            message=error["message"],
-        )
-
-    if data["status"] != "succeeded":
-        return CompleteIntentResponse(
-            intent=intent,
-            status=CompleteIntentStatus.FAILED,
-            code=data["status"],
-            message="Failed to complete the intent."
-        )
-
-    return CompleteIntentResponse(
-        intent=intent,
-        status=CompleteIntentStatus.SUCCEEDED,
-        code=data["status"],
-        message="Intent completed."
-    )
+    return Intent.model_validate(response.json())

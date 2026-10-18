@@ -1,5 +1,3 @@
-"""Enumerations shared across pubstripe's models and functions."""
-
 from enum import StrEnum
 
 
@@ -11,51 +9,43 @@ class ProxyScheme(StrEnum):
 
 
 class IntentType(StrEnum):
-    """The two kinds of Stripe intent that pubstripe can confirm.
-
-    Determined automatically from a client secret's prefix by
-    :func:`pubstripe.intent.intent_from_client_secret`.
-    """
+    """The two kinds of Stripe intent, matching the API's ``object`` field."""
 
     SETUP_INTENT = "setup_intent"
     PAYMENT_INTENT = "payment_intent"
 
 
-class ConfirmIntentStatus(StrEnum):
-    """Outcome of :func:`pubstripe.intent.confirm_intent`."""
+class IntentStatus(StrEnum):
+    """An intent's ``status`` as Stripe reports it."""
 
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
+    REQUIRES_PAYMENT_METHOD = "requires_payment_method"
+    REQUIRES_CONFIRMATION = "requires_confirmation"
     REQUIRES_ACTION = "requires_action"
-
-
-class CompleteIntentStatus(StrEnum):
-    """Outcome of :func:`pubstripe.intent.complete_intent_after_3ds2`."""
-
+    PROCESSING = "processing"
+    REQUIRES_CAPTURE = "requires_capture"
+    CANCELED = "canceled"
     SUCCEEDED = "succeeded"
-    FAILED = "failed"
 
 
 class ThreeDSecureStatus(StrEnum):
-    """Result of a 3D Secure 2 authentication challenge.
+    """The ACS's ``transStatus`` code, as defined by the EMV 3-D Secure standard.
 
-    Returned by :func:`pubstripe.three_d_secure.authenticate_three_d_secure`,
-    mapped from Stripe's single-letter ACS ``transStatus`` code.
+    The values are the codes Stripe returns in ``ares.transStatus``.
     """
 
-    FRICTIONLESS = "frictionless"
-    """Authenticated without showing the cardholder a challenge (``transStatus`` "Y")."""
-    FAILED = "failed"
-    """Authentication was attempted but failed (``transStatus`` "N")."""
-    UNAVAILABLE = "unavailable"
-    """3D Secure is not available for this card/issuer (``transStatus`` "U")."""
-    ATTEMPTED = "attempted"
-    """Authentication was attempted; liability shift may still apply (``transStatus`` "A")."""
-    CHALLENGE = "challenge"
-    """The cardholder must complete an interactive challenge (``transStatus`` "C")."""
-    REJECTED = "rejected"
-    """The issuer rejected the authentication (``transStatus`` "R")."""
-    DECOUPLED = "decoupled"
-    """Authentication will be completed asynchronously (``transStatus`` "D")."""
-    INFORMATIONAL = "informational"
-    """Informational only; no decision was made (``transStatus`` "I")."""
+    AUTHENTICATED = "Y"
+    """Authentication or account verification successful."""
+    NOT_AUTHENTICATED = "N"
+    """Not authenticated or account not verified; the transaction was denied."""
+    UNAVAILABLE = "U"
+    """Authentication or verification could not be performed."""
+    ATTEMPTED = "A"
+    """Attempts processing performed; not authenticated, but a proof of attempt exists."""
+    CHALLENGE_REQUIRED = "C"
+    """The cardholder must complete an additional challenge."""
+    DECOUPLED = "D"
+    """A decoupled challenge is required, and authentication will complete asynchronously."""
+    REJECTED = "R"
+    """Authentication or verification rejected; the issuer asks that it not be attempted."""
+    INFORMATIONAL = "I"
+    """Informational only."""
